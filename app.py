@@ -1059,6 +1059,7 @@ with tab5:
                 with st.spinner("Generating AI narrative via Claude API…"):
                     narrative = generate_ai_narrative(rdata, _api_key)
                 rdata["ai_narrative"] = narrative
+                st.session_state["ai_narrative"] = narrative   # cache for Excel reuse
             elif incl_ai and not _api_key:
                 st.warning("⚠️ Enter your Anthropic API Key in the sidebar to generate the AI narrative.")
 
@@ -1082,7 +1083,7 @@ with tab5:
     # ── Excel ─────────────────────────────────────────────────────────────────
     with col_xls:
         st.markdown("**📊 Excel Export**")
-        st.caption("Includes: Sampling Parameters sheet, Selected Samples sheet with result-entry columns, Projection sheet.")
+        st.caption("Includes: Sampling Parameters sheet, Selected Samples sheet with result-entry columns, Projection sheet, and AI Methodology sheet.")
 
         if st.button("Generate Excel Export", key="xls_btn"):
             xls_out = io.BytesIO()
@@ -1209,6 +1210,97 @@ with tab5:
                         pw.write(lr + si, 1, v, dat_fmt)
                         pw.set_column(0, 0, 40)
                         pw.set_column(1, 1, 50)
+
+                # ── Sheet 4: AI Methodology ───────────────────────────────────
+                # Build report_data for narrative (mirrors PDF rdata construction)
+                rdata_xls = {
+                    "engagement": st.session_state.get("engagement", {}),
+                    "sampling": {
+                        "sampling_type":    st.session_state.get("sampling_type", "—"),
+                        "population":       st.session_state.get("pop_amount", 0),
+                        "selection_method": st.session_state.get("sel_method", "—"),
+                    },
+                }
+                if st.session_state.get("tod_params"):
+                    rdata_xls["tod"] = st.session_state["tod_params"]
+                if st.session_state.get("toc_params"):
+                    rdata_xls["toc"] = st.session_state["toc_params"]
+                proj_x = st.session_state.get("projection")
+                if proj_x:
+                    rdata_xls["projection"] = {
+                        "projected":     proj_x["projected_misstatement"],
+                        "anomalous":     proj_x["anomalous_misstatement"],
+                        "total":         proj_x["total_misstatement"],
+                        "tolerable":     proj_x["tolerable_misstatement"],
+                        "conclusion":    proj_x["conclusion"],
+                        "is_acceptable": proj_x["is_acceptable"],
+                    }
+
+                # Reuse cached narrative or generate fresh
+                ai_text = st.session_state.get("ai_narrative")
+                if not ai_text and _api_key:
+                    with st.spinner("Generating AI methodology narrative for Excel…"):
+                        ai_text = generate_ai_narrative(rdata_xls, _api_key)
+                    st.session_state["ai_narrative"] = ai_text
+
+                mw = wb.add_worksheet("AI Methodology")
+                mw.set_column(0, 0, 28)
+                mw.set_column(1, 1, 100)
+
+                wrap_fmt = wb.add_format({
+                    "font_name": "Arial", "font_size": 10,
+                    "text_wrap": True, "valign": "top", "border": 0,
+                })
+                label_fmt = wb.add_format({
+                    "bold": True, "font_name": "Arial", "font_size": 9,
+                    "font_color": "#808285", "valign": "top",
+                    "bg_color": "#F5F5F5", "border": 1,
+                })
+                footer_fmt = wb.add_format({
+                    "font_name": "Arial", "font_size": 8,
+                    "font_color": "#808285", "italic": True,
+                })
+
+                mw.write(0, 0,
+                         "KKC & Associates LLP – AI-Assisted Sampling Methodology Narrative",
+                         title_fmt)
+                mw.write(2, 0, "Section",  gry_hdr)
+                mw.write(2, 1, "Narrative", gry_hdr)
+
+                section_labels = [
+                    "Purpose & Methodology",
+                    "Sample Size Determination",
+                    "Sample Selection",
+                    "Conclusion",
+                ]
+
+                paragraphs = []
+                if ai_text:
+                    paragraphs = [p.strip() for p in ai_text.split("\n\n") if p.strip()]
+                    # Fall back: split on single newlines if no double-newlines found
+                    if len(paragraphs) == 1:
+                        paragraphs = [p.strip() for p in ai_text.split("\n") if p.strip()]
+
+                if paragraphs:
+                    for i, para in enumerate(paragraphs):
+                        lbl = section_labels[i] if i < len(section_labels) else f"Paragraph {i + 1}"
+                        mw.write(3 + i, 0, lbl, label_fmt)
+                        mw.write(3 + i, 1, para, wrap_fmt)
+                        mw.set_row(3 + i, 90)  # height for wrapped text
+                else:
+                    mw.write(3, 0, "Note", label_fmt)
+                    mw.write(3, 1,
+                             "AI narrative not generated. Enter your Anthropic API Key in the sidebar "
+                             "and generate the Excel export again to include the AI-assisted methodology.",
+                             wrap_fmt)
+                    mw.set_row(3, 45)
+
+                footer_row = 3 + max(len(paragraphs), 1) + 2
+                mw.write(footer_row, 1,
+                         f"Generated by Claude AI (Anthropic) | "
+                         f"{datetime.now().strftime('%d %B %Y, %H:%M')} | "
+                         "For internal audit documentation purposes only",
+                         footer_fmt)
 
             slug = st.session_state["engagement"].get("client_name", "Client").replace(" ", "_")
             st.download_button(

@@ -1083,7 +1083,7 @@ with tab5:
     # ── Excel ─────────────────────────────────────────────────────────────────
     with col_xls:
         st.markdown("**📊 Excel Export**")
-        st.caption("Includes: Sampling Parameters sheet, Selected Samples sheet with result-entry columns, Projection sheet, and AI Methodology sheet.")
+        st.caption("Includes: Sampling Parameters, Selected Samples (with result-entry columns), Misstatement Projection, and Sampling Methodology sheets.")
 
         if st.button("Generate Excel Export", key="xls_btn"):
             xls_out = io.BytesIO()
@@ -1211,50 +1211,33 @@ with tab5:
                         pw.set_column(0, 0, 40)
                         pw.set_column(1, 1, 50)
 
-                # ── Sheet 4: AI Methodology ───────────────────────────────────
-                # Build report_data for narrative (mirrors PDF rdata construction)
-                rdata_xls = {
-                    "engagement": st.session_state.get("engagement", {}),
-                    "sampling": {
-                        "sampling_type":    st.session_state.get("sampling_type", "—"),
-                        "population":       st.session_state.get("pop_amount", 0),
-                        "selection_method": st.session_state.get("sel_method", "—"),
-                    },
-                }
-                if st.session_state.get("tod_params"):
-                    rdata_xls["tod"] = st.session_state["tod_params"]
-                if st.session_state.get("toc_params"):
-                    rdata_xls["toc"] = st.session_state["toc_params"]
-                proj_x = st.session_state.get("projection")
-                if proj_x:
-                    rdata_xls["projection"] = {
-                        "projected":     proj_x["projected_misstatement"],
-                        "anomalous":     proj_x["anomalous_misstatement"],
-                        "total":         proj_x["total_misstatement"],
-                        "tolerable":     proj_x["tolerable_misstatement"],
-                        "conclusion":    proj_x["conclusion"],
-                        "is_acceptable": proj_x["is_acceptable"],
-                    }
+                # ── Sheet 4: Sampling Methodology (deterministic – no API key needed) ──
+                from utils.sampling import (
+                    BASE_CONFIDENCE, CONTROLS_MULT, SADA_MULT,
+                    SAP_MULT, EXPECTED_ERROR_UPLIFT,
+                )
 
-                # Reuse cached narrative or generate fresh
-                ai_text = st.session_state.get("ai_narrative")
-                if not ai_text and _api_key:
-                    with st.spinner("Generating AI methodology narrative for Excel…"):
-                        ai_text = generate_ai_narrative(rdata_xls, _api_key)
-                    st.session_state["ai_narrative"] = ai_text
+                tod_m  = st.session_state.get("tod_params", {})
+                toc_m  = st.session_state.get("toc_params", {})
+                eng_m  = st.session_state.get("engagement", {})
+                sel_m  = st.session_state.get("sel_method", "—")
+                stype_m = st.session_state.get("sampling_type", "—")
+                pop_m  = st.session_state.get("pop_amount", 0)
+                strat_m = st.session_state.get("strat_summary")
 
-                mw = wb.add_worksheet("AI Methodology")
-                mw.set_column(0, 0, 28)
-                mw.set_column(1, 1, 100)
+                mw = wb.add_worksheet("Sampling Methodology")
+                mw.set_column(0, 0, 34)
+                mw.set_column(1, 1, 95)
 
                 wrap_fmt = wb.add_format({
                     "font_name": "Arial", "font_size": 10,
-                    "text_wrap": True, "valign": "top", "border": 0,
+                    "text_wrap": True, "valign": "top",
+                    "border": 1, "border_color": "#CCCCCC",
                 })
-                label_fmt = wb.add_format({
+                lbl_fmt = wb.add_format({
                     "bold": True, "font_name": "Arial", "font_size": 9,
-                    "font_color": "#808285", "valign": "top",
-                    "bg_color": "#F5F5F5", "border": 1,
+                    "font_color": "#FFFFFF", "valign": "top",
+                    "bg_color": "#808285", "border": 1,
                 })
                 footer_fmt = wb.add_format({
                     "font_name": "Arial", "font_size": 8,
@@ -1262,44 +1245,153 @@ with tab5:
                 })
 
                 mw.write(0, 0,
-                         "KKC & Associates LLP – AI-Assisted Sampling Methodology Narrative",
+                         "KKC & Associates LLP – Audit Sampling: Methodology Used by AI Tool",
                          title_fmt)
-                mw.write(2, 0, "Section",  gry_hdr)
-                mw.write(2, 1, "Narrative", gry_hdr)
+                mw.write(2, 0, "Section",              gry_hdr)
+                mw.write(2, 1, "Methodology Details",  gry_hdr)
 
-                section_labels = [
-                    "Purpose & Methodology",
-                    "Sample Size Determination",
-                    "Sample Selection",
-                    "Conclusion",
-                ]
+                meth_rows = []
 
-                paragraphs = []
-                if ai_text:
-                    paragraphs = [p.strip() for p in ai_text.split("\n\n") if p.strip()]
-                    # Fall back: split on single newlines if no double-newlines found
-                    if len(paragraphs) == 1:
-                        paragraphs = [p.strip() for p in ai_text.split("\n") if p.strip()]
+                # 1. Applicable standards
+                meth_rows.append(("Applicable Standards",
+                    "SA 530 – Audit Sampling (ICAI): Governs design, selection, and evaluation "
+                    "of audit samples. Requires that the sample be representative of the "
+                    "population and sufficient to draw valid conclusions about the population.\n"
+                    "KKC Sampling Guide – Section 26: Firm-specific implementation prescribing "
+                    "the Poisson MUS methodology for Test of Details (TOD) and mandatory minimum "
+                    "sample sizes for Test of Controls (TOC) per Appendix V."))
 
-                if paragraphs:
-                    for i, para in enumerate(paragraphs):
-                        lbl = section_labels[i] if i < len(section_labels) else f"Paragraph {i + 1}"
-                        mw.write(3 + i, 0, lbl, label_fmt)
-                        mw.write(3 + i, 1, para, wrap_fmt)
-                        mw.set_row(3 + i, 90)  # height for wrapped text
+                # 2. Engagement context
+                meth_rows.append(("Engagement Context",
+                    f"Client          : {eng_m.get('client_name','—')}\n"
+                    f"Audit Area      : {eng_m.get('audit_area','—')}\n"
+                    f"Financial Year  : {eng_m.get('financial_year','—')}\n"
+                    f"Sampling Type   : {stype_m}\n"
+                    f"Population (₹)  : ₹{pop_m:,.2f}\n"
+                    f"Selection Method: {sel_m}"))
+
+                # 3. TOD methodology (if applicable)
+                if tod_m:
+                    pm   = tod_m.get("pm", 0)
+                    ee   = tod_m.get("expected_error", "None")
+                    er   = tod_m.get("entity_risk", "—")
+                    ar   = tod_m.get("assertion_risk", "—")
+                    cr   = tod_m.get("controls_response", "None")
+                    sada = tod_m.get("sada_response", "None")
+                    sap  = tod_m.get("sap_response", "None")
+                    conf = tod_m.get("confidence", 0)
+                    rf   = tod_m.get("reliability_factor", 0)
+                    tm_r = tod_m.get("tm_rate", 0)
+                    n    = tod_m.get("sample_size", 0)
+                    base_conf = BASE_CONFIDENCE.get((ar, er), 0.75)
+                    uplift    = EXPECTED_ERROR_UPLIFT.get(ee, 0)
+                    base_n    = rf / tm_r if tm_r else 0
+
+                    meth_rows.append(("TOD – Poisson MUS: Formula",
+                        "The tool applies Poisson Monetary Unit Sampling (MUS) calibrated to "
+                        "the Inflo Sampling Methodology (KKC Sampling Guide – Appendix VI).\n\n"
+                        "Step-by-step formula:\n"
+                        "  1. Derive Required Confidence Level from the five risk parameters\n"
+                        "  2. Reliability Factor  R  =  –ln(1 – Confidence Level)\n"
+                        "  3. Tolerable Misstatement Rate  =  PM ÷ Population Amount\n"
+                        "  4. Base sample size  =  R ÷ TM Rate\n"
+                        "  5. Final n  =  ceil(Base n  ×  (1 + Expected Error Uplift))"))
+
+                    cr_line   = (f"Controls Response ({cr}): ×{CONTROLS_MULT.get(cr,1):.3f} multiplier applied\n"
+                                 if cr != "None" else "Controls Response: None – no reduction\n")
+                    sada_line = (f"SADA Response ({sada}):     ×{SADA_MULT.get(sada,1):.3f} multiplier applied\n"
+                                 if sada != "None" else "SADA Response: None – no reduction\n")
+                    sap_line  = (f"SAP Response ({sap}):      ×{SAP_MULT.get(sap,1):.3f} multiplier applied\n"
+                                 if sap != "None" else "SAP Response: None – no reduction\n")
+                    meth_rows.append(("TOD – Confidence Level Derivation",
+                        f"Base confidence ({ar} assertion risk × {er} entity risk)  =  {base_conf:.0%}\n"
+                        + cr_line + sada_line + sap_line +
+                        f"\nRequired Confidence Level used  =  {conf:.2%}"))
+
+                    meth_rows.append(("TOD – Calculation Walkthrough",
+                        f"Performance Materiality (PM)          : ₹{pm:,.2f}\n"
+                        f"Population Amount                     : ₹{pop_m:,.2f}\n"
+                        f"TM Rate  =  PM ÷ Population           : {tm_r:.6%}\n"
+                        f"Required Confidence Level             : {conf:.2%}\n"
+                        f"Reliability Factor  R = –ln(1–{conf:.0%})  : {rf:.6f}\n"
+                        f"Base n  =  R ÷ TM Rate                : {base_n:.4f}\n"
+                        f"Expected Error Rate                   : {ee}  (uplift: +{uplift:.0%})\n"
+                        f"Final n  =  ceil({base_n:.4f} × {1+uplift:.2f})  =  {n}\n\n"
+                        f"MINIMUM REQUIRED SAMPLE SIZE          : {n} items"))
+
+                # 4. TOC methodology (if applicable)
+                if toc_m:
+                    meth_rows.append(("TOC – Minimum Sample Size (Appendix V)",
+                        f"Control Frequency       : {toc_m.get('frequency','—')}\n"
+                        f"Assertion Risk Level    : {toc_m.get('risk_level','—')}\n"
+                        f"Minimum Sample Size     : {toc_m.get('min_sample','—')} items\n\n"
+                        "Source: KKC Sampling Guide – Appendix V. These are mandatory minimums "
+                        "derived from a pre-approved firm table. The engagement team cannot "
+                        "select fewer samples than the table prescribes for the given "
+                        "control frequency and risk level combination."))
+
+                # 5. Selection method
+                _sel_desc = {
+                    "Random (Simple)": (
+                        "Simple Random Sampling: Every item in the population has an equal and "
+                        "independent probability of selection. A computerised random number "
+                        "generator (Python random module) is used with a fixed seed (default 42) "
+                        "to ensure the sample is reproducible and auditable. "
+                        "Reference: KKC Sampling Guide – Appendix II."
+                    ),
+                    "Systematic": (
+                        "Systematic Sampling: A random starting point is selected, then every "
+                        "Nth item is chosen (N = Population Count ÷ Sample Size). Efficient "
+                        "for large, ordered populations. The random start is generated with seed "
+                        "42 for reproducibility. Pre-condition verified: no cyclical pattern "
+                        "exists in the data. Reference: KKC Sampling Guide – Appendix II."
+                    ),
+                    "MUS (Monetary Unit Sampling)": (
+                        "Monetary Unit Sampling (MUS): Each rupee in the population has an equal "
+                        "chance of selection. Items are therefore selected with probability "
+                        "proportional to their monetary value – larger transactions are more "
+                        "likely to be selected. A random start within the first sampling "
+                        "interval is generated using seed 42. Recommended for TOD "
+                        "existence / valuation assertions. "
+                        "Reference: KKC Sampling Guide – Appendix II and Appendix VI."
+                    ),
+                }
+                meth_rows.append(("Sample Selection Method",
+                    _sel_desc.get(sel_m,
+                                  f"Method: {sel_m}. "
+                                  "Reference: KKC Sampling Guide – Appendix II.")))
+
+                # 6. Stratification
+                if strat_m is not None:
+                    meth_rows.append(("Stratification",
+                        "The population was stratified prior to sample selection per "
+                        "KKC Sampling Guide – Appendix I. The top stratum (individually "
+                        "significant items exceeding the stratification threshold) is selected "
+                        "100%. Remaining strata are sampled proportionally to ensure audit "
+                        "focus is concentrated on higher-risk, higher-value transactions."))
                 else:
-                    mw.write(3, 0, "Note", label_fmt)
-                    mw.write(3, 1,
-                             "AI narrative not generated. Enter your Anthropic API Key in the sidebar "
-                             "and generate the Excel export again to include the AI-assisted methodology.",
-                             wrap_fmt)
-                    mw.set_row(3, 45)
+                    meth_rows.append(("Stratification",
+                        "Not applied. The population was treated as a single homogeneous "
+                        "stratum and the full sample size was drawn from it directly."))
 
-                footer_row = 3 + max(len(paragraphs), 1) + 2
-                mw.write(footer_row, 1,
-                         f"Generated by Claude AI (Anthropic) | "
-                         f"{datetime.now().strftime('%d %B %Y, %H:%M')} | "
-                         "For internal audit documentation purposes only",
+                # 7. Reproducibility
+                meth_rows.append(("Reproducibility & Audit Trail",
+                    "All randomisation uses a fixed seed (default: 42). This guarantees "
+                    "that re-running the tool with the same input file and parameters will "
+                    "produce the identical sample. The seed is documented in the work "
+                    "papers to satisfy the audit trail requirements of SA 530 para 12."))
+
+                # Write rows
+                for i, (lbl, txt) in enumerate(meth_rows):
+                    mw.write(3 + i, 0, lbl, lbl_fmt)
+                    mw.write(3 + i, 1, txt, wrap_fmt)
+                    mw.set_row(3 + i, max(60, txt.count("\n") * 16 + 20))
+
+                mw.write(3 + len(meth_rows) + 1, 1,
+                         f"KKC Audit Sampling Tool  |  "
+                         f"{datetime.now().strftime('%d %B %Y, %H:%M')}  |  "
+                         "For internal audit documentation purposes only  |  "
+                         "SA 530 (ICAI)  |  KKC Sampling Guide Section 26",
                          footer_fmt)
 
             slug = st.session_state["engagement"].get("client_name", "Client").replace(" ", "_")

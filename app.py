@@ -42,7 +42,7 @@ from utils.file_handler import (
     stratification_summary,
 )
 from utils.projections import calculate_projected_misstatement
-from utils.report_generator import generate_ai_narrative, generate_pdf_report
+from utils.report_generator import generate_ai_narrative, generate_pdf_report, generate_samples_pdf
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -866,12 +866,30 @@ with tab3:
                     ws.set_column(ci, ci, 20)
 
             client_slug = st.session_state["engagement"].get("client_name", "Client").replace(" ", "_")
-            st.download_button(
-                label="⬇️ Download Sample List (Excel)",
-                data=xls_buf.getvalue(),
-                file_name=f"KKC_Sample_{client_slug}_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                st.download_button(
+                    label="⬇️ Download Sample List (Excel)",
+                    data=xls_buf.getvalue(),
+                    file_name=f"KKC_Sample_{client_slug}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            with dl_col2:
+                try:
+                    pdf_bytes = generate_samples_pdf(
+                        sample_df=sample_df,
+                        engagement=st.session_state.get("engagement", {}),
+                        stats=stats,
+                        col_map=st.session_state.get("col_map", {}),
+                    )
+                    st.download_button(
+                        label="⬇️ Download Sample List (PDF)",
+                        data=pdf_bytes,
+                        file_name=f"KKC_Sample_{client_slug}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf",
+                    )
+                except Exception as pdf_exc:
+                    st.error(f"❌ PDF generation failed: {pdf_exc}")
 
         except Exception as exc:
             st.error(f"❌ Error generating sample: {exc}")

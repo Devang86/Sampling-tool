@@ -42,7 +42,12 @@ from utils.file_handler import (
     stratification_summary,
 )
 from utils.projections import calculate_projected_misstatement
-from utils.report_generator import generate_ai_narrative, generate_pdf_report, generate_samples_pdf
+from utils.report_generator import generate_ai_narrative, generate_pdf_report
+try:
+    from utils.report_generator import generate_samples_pdf
+    _SAMPLES_PDF_AVAILABLE = True
+except ImportError:
+    _SAMPLES_PDF_AVAILABLE = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -875,21 +880,24 @@ with tab3:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             with dl_col2:
-                try:
-                    pdf_bytes = generate_samples_pdf(
-                        sample_df=sample_df,
-                        engagement=st.session_state.get("engagement", {}),
-                        stats=stats,
-                        col_map=st.session_state.get("col_map", {}),
-                    )
-                    st.download_button(
-                        label="⬇️ Download Sample List (PDF)",
-                        data=pdf_bytes,
-                        file_name=f"KKC_Sample_{client_slug}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                        mime="application/pdf",
-                    )
-                except Exception as pdf_exc:
-                    st.error(f"❌ PDF generation failed: {pdf_exc}")
+                if _SAMPLES_PDF_AVAILABLE:
+                    try:
+                        pdf_bytes = generate_samples_pdf(
+                            sample_df=sample_df,
+                            engagement=st.session_state.get("engagement", {}),
+                            stats=stats,
+                            col_map=st.session_state.get("col_map", {}),
+                        )
+                        st.download_button(
+                            label="⬇️ Download Sample List (PDF)",
+                            data=pdf_bytes,
+                            file_name=f"KKC_Sample_{client_slug}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                        )
+                    except Exception as pdf_exc:
+                        st.error(f"❌ PDF generation failed: {pdf_exc}")
+                else:
+                    st.caption("PDF export unavailable — redeploy with updated report_generator.py")
 
         except Exception as exc:
             st.error(f"❌ Error generating sample: {exc}")
